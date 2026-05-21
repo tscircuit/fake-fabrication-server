@@ -1,0 +1,40 @@
+{
+  "name": "@tscircuit/fake-fabrication-server",
+  "version": "0.0.1",
+  "description": "Fake fabrication server fixture for testing PCB fabrication workflows",
+  "module": "lib/index.ts",
+  "type": "module",
+  "files": ["dist", "lib", "routes", "winterspec.config.ts"],
+  "main": "lib/index.ts",
+  "types": "lib/types.ts",
+  "exports": {
+    ".": "./lib/index.ts",
+    "./dist/bundle.js": {
+      "types": "./lib/bundle.d.ts",
+      "import": "./dist/bundle.js"
+    },
+    "./types": "./lib/types.ts"
+  },
+  "scripts": {
+    "start": "winterspec dev",
+    "dev": "winterspec dev",
+    "build": "winterspec bundle -o dist/bundle.js",
+    "prepare": "bun run build",
+    "test": "bun test",
+    "format": "biome format --write .",
+    "typecheck": "bunx tsc --noEmit"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.2",
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "winterspec": "^0.0.114",
+    "zod": "^3.23.8",
+    "zustand": "^5.0.13",
+    "zustand-hoist": "^2.0.1"
+  }
+}
