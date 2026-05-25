@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { releaseCarrier } from "../../lib/carrier"
-import { carrierStateSchema } from "../../lib/db/schema"
+import { carrierResponseSchema } from "../../lib/db/schema"
 import { withRouteSpec } from "../../lib/middleware/with-winter-spec"
 
 export default withRouteSpec({
@@ -8,11 +8,7 @@ export default withRouteSpec({
   jsonBody: z.object({
     fabrication_job_id: z.string(),
   }),
-  jsonResponse: z.object({
-    ok: z.literal(true),
-    fabrication_job_id: z.string(),
-    carrier: carrierStateSchema,
-  }),
+  jsonResponse: carrierResponseSchema,
 })(async (req, ctx) => {
   const result = releaseCarrier(req.jsonBody, ctx)
   if (result instanceof Response) {

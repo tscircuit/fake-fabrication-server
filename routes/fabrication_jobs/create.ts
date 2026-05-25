@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { createJob } from "../../lib/jobs"
-import { jobSchema } from "../../lib/db/schema"
+import { jobResponseSchema } from "../../lib/db/schema"
 import { withRouteSpec } from "../../lib/middleware/with-winter-spec"
 
 export default withRouteSpec({
@@ -20,11 +20,11 @@ export default withRouteSpec({
       .record(z.union([z.string(), z.number(), z.boolean(), z.null()]))
       .optional(),
   }),
-  jsonResponse: jobSchema,
+  jsonResponse: jobResponseSchema,
 })(async (req, ctx) => {
   const result = await createJob(req.jsonBody, ctx)
   if (result instanceof Response) {
     return result
   }
-  return ctx.json(result)
+  return ctx.json({ fabrication_job: result })
 })

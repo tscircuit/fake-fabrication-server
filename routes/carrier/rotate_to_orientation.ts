@@ -1,6 +1,6 @@
 import { z } from "zod"
-import { setLaserAlignment } from "../../lib/laser"
-import { laserStateSchema } from "../../lib/db/schema"
+import { rotateCarrierToOrientation } from "../../lib/carrier"
+import { carrierResponseSchema } from "../../lib/db/schema"
 import { withRouteSpec } from "../../lib/middleware/with-winter-spec"
 
 export default withRouteSpec({
@@ -8,17 +8,12 @@ export default withRouteSpec({
   jsonBody: z
     .object({
       fabrication_job_id: z.string(),
-      lbrn: z.string(),
-      on: z.boolean(),
+      orientation: z.enum(["top", "bottom", "pcb_insertion", "pcb_drop"]),
     })
     .strict(),
-  jsonResponse: z.object({
-    ok: z.literal(true),
-    fabrication_job_id: z.string(),
-    laser: laserStateSchema,
-  }),
+  jsonResponse: carrierResponseSchema,
 })(async (req, ctx) => {
-  const result = setLaserAlignment(req.jsonBody, ctx)
+  const result = rotateCarrierToOrientation(req.jsonBody, ctx)
   if (result instanceof Response) {
     return result
   }

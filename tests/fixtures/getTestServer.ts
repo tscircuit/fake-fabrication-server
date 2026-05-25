@@ -2,18 +2,18 @@ import { afterEach, expect } from "bun:test"
 import ky from "ky"
 import {
   FabricationServer,
-  fabricationStepOrder,
+  fabricationStageOrder,
   type CarrierResponse,
-  type FabricationStepSlug,
+  type FabricationStageSlug,
   type Job,
   type JobLbrnFiles,
   type LaserResponse,
 } from "../../lib/index"
 
 export {
-  fabricationStepOrder,
+  fabricationStageOrder,
   type CarrierResponse,
-  type FabricationStepSlug,
+  type FabricationStageSlug,
   type Job,
   type JobLbrnFiles,
   type LaserResponse,
@@ -47,17 +47,18 @@ export async function getTestServer(): Promise<TestServerContext> {
   }
 }
 
-export const testLbrnFiles: JobLbrnFiles = {
-  top_alignment: "https://fake-r2.tscircuit.com/job_abc/top-alignment.lbrn",
-  bottom_alignment:
-    "https://fake-r2.tscircuit.com/job_abc/bottom-alignment.lbrn",
-  top_deoxidation: "https://fake-r2.tscircuit.com/job_abc/top-deoxidation.lbrn",
-  top_copper_fill: "https://fake-r2.tscircuit.com/job_abc/top-copper-fill.lbrn",
-  bottom_deoxidation:
-    "https://fake-r2.tscircuit.com/job_abc/bottom-deoxidation.lbrn",
-  bottom_copper_fill:
-    "https://fake-r2.tscircuit.com/job_abc/bottom-copper-fill.lbrn",
-}
+const FAKE_LBRN_CONTENT = `<?xml version="1.0" encoding="UTF-8"?>
+<LightBurnProject AppVersion="1.7.00" FormatVersion="1" MaterialHeight="0" MirrorX="False" MirrorY="False">
+</LightBurnProject>`
+
+export const testLbrnFiles = {
+  top_alignment: FAKE_LBRN_CONTENT,
+  bottom_alignment: FAKE_LBRN_CONTENT,
+  top_deoxidation: FAKE_LBRN_CONTENT,
+  top_copper_fill: FAKE_LBRN_CONTENT,
+  bottom_deoxidation: FAKE_LBRN_CONTENT,
+  bottom_copper_fill: FAKE_LBRN_CONTENT,
+} satisfies JobLbrnFiles
 
 export async function createTestJob(ky: TestKy): Promise<Job> {
   const response = await ky.post("fabrication_jobs/create", {

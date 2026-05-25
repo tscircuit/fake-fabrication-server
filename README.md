@@ -1,64 +1,62 @@
 # fake-fabrication-server
 
-A Bun + [Winterspec](https://github.com/tscircuit/winterspec) fake fabrication server for testing PCB fabrication workflows. Models a 13-step laser-PCB pipeline from loading and clamping through alignment, burning, carrier release, and completion.
+A fake fabrication API for testing PCB fabrication workflows.
 
-Reference implementation patterned after [fake-stripe](https://github.com/tscircuit/fake-stripe/tree/main).
+Reference style:
 
-## API
+- https://github.com/tscircuit/fake-stripe/tree/main
 
-### Jobs
+## API Spec
 
-- `POST /fabrication_jobs` — create a new fabrication job. Body: `{ lbrn_files: {...}, metadata?: {...} }`. `lbrn_files` must include six URL keys: `top_alignment`, `bottom_alignment`, `top_deoxidation`, `top_copper_fill`, `bottom_deoxidation`, `bottom_copper_fill`. Returns the `Job` with `status: "in_progress"` and `current_step: "load_pcb"`.
-- `GET /fabrication_jobs?fabrication_job_id=<id>` — retrieve a job's full state (steps, laser state, carrier state, alignment offsets).
-- `POST /fabrication_jobs/steps/complete` — confirm a step finished. Body: `{ fabrication_job_id, step }`. Only the current step can be completed; `current_step` advances on success. When the final step (`complete`) is confirmed, `status` becomes `"complete"` and `current_step` becomes `null`.
+The API uses HTTP RPC endpoints, following the Seam resource/action path style. Do not version endpoint paths. Request and response fields use `snake_case`, with resource IDs and command parameters at the top level.
 
-### Laser commands
+Read-only endpoints can be called with `GET` or `POST`. Mutating endpoints use `POST`.
 
-All laser commands take a `fabrication_job_id` and return `{ ok, fabrication_job_id, laser }`.
+Resource endpoints wrap returned objects with their resource name, for example `{ fabrication_job: {...} }`.
 
-- `POST /laser/alignment` — `{ fabrication_job_id, lbrn, on }`. Toggle alignment mode. Turning on records the current laser position as the alignment origin and sets `alignment_lbrn`. Turning off clears both.
-- `POST /laser/move` — `{ fabrication_job_id, dx, dy }`. Accumulate relative offsets on the laser head position. Used during alignment to dial in registration.
-- `POST /laser/burn` — `{ fabrication_job_id, lbrn, passes? }`. Execute one or more burn passes for the current burn step. Validates the `.lbrn` URL against the expected file for the current step, fetches its content, and applies the saved alignment offset. Stores `last_burn_lbrn`, `last_burn_passes`, `last_burn_offset`, and `last_burn_file_content` on the laser state.
+### Fabrication Jobs
 
-### Carrier commands
+- `POST /fabrication_jobs/create` - create a new fabrication job. Body: `{ lbrn_files: {}, string>, metadata?: {...} }`. `lbrn_files` is a free-form map of VFS file path to file content. Returns `{ fabrication_job: {...} }` with `status: "in_progress"` and `current_stage: "load_pcb"`.
+- `GET|POST /fabrication_jobs/get` - `{ fabrication_job_id }`. Retrieve a job's full state, including stages, laser state, carrier state, and saved alignment origins. Returns `{ fabrication_job: {...} }`.
+- `GET|POST /fabrication_jobs/list` - `{ limit? }`. List fabrication jobs. Returns `{ fabrication_jobs: [...] }`.
+- `POST /fabrication_jobs/next_stage` - `{ fabrication_job_id, current_stage: "..." }`. Confirms the current stage is complete and advances the job. When the final stage is confirmed, `status` becomes `"complete"` and `current_stage` becomes `null`. Returns `{ fabrication_job: {...} }`.
 
-All carrier commands take a `fabrication_job_id` and return `{ ok, fabrication_job_id, carrier }`.
+### Laser Commands
 
-- `POST /carrier/move_along_rail` — `{ fabrication_job_id, x }` or `{ fabrication_job_id, dx }`. Absolute or relative x translation along the rail.
-- `POST /carrier/clamp` — `{ fabrication_job_id, delta }`. Adjust clamp position by a relative motor delta. Cannot go below zero.
-- `POST /carrier/rotate` — `{ fabrication_job_id, delta_deg }` or `{ fabrication_job_id, angle_deg }`. Relative delta or absolute angle. Stored value is normalized to `[0, 360)`.
-- `POST /carrier/release` — `{ fabrication_job_id }`. Set clamp position to 0 (unclamp).
+Laser command endpoints take top-level `fabrication_job_id`.
 
-### Health
+- `POST /laser/set_origin` - `{ fabrication_job_id, origin: { x, y } }`. Save the laser origin. When called during `top_deoxidation` or `top_copper_fill`, also persists `top_alignment_origin` on the job. When called during `bottom_deoxidation` or `bottom_copper_fill`, also persists `bottom_alignment_origin`. Returns `{ fabrication_job_id, laser: {...} }`.
+- `POST /laser/burn` - `{ fabrication_job_id, lbrn_vfs_path, passes? }`. Execute one or more burn passes for the current burn stage. Validates `lbrn_vfs_path` matches the current stage slug, reads content from `lbrn_files[lbrn_vfs_path]`, and applies the saved alignment origin. Stores `last_burn_lbrn`, `last_burn_passes`, `last_burn_origin`, and `last_burn_file_content` on the burn run. Returns `{ fabrication_job_id, laser: {...}, laser_burn_run: {...} }`.
+- `GET|POST /laser_burn_runs/list` - `{ fabrication_job_id, limit? }`. List burn runs for a fabrication job. Returns `{ laser_burn_runs: [...] }`.
+- `GET|POST /laser_burn_runs/get` - `{ laser_burn_run_id }`. Retrieve one burn run. Returns `{ laser_burn_run: {...} }`.
 
-- `GET /health` — returns `{ ok: true }`.
+### Carrier Commands
+
+Carrier command endpoints take top-level `fabrication_job_id`.
+
+- `POST /carrier/move_along_rail` - `{ fabrication_job_id, x }`. Move the carrier to an absolute x position along the rail. Returns `{ fabrication_job_id, carrier: {...} }`.
+- `POST /carrier/clamp` - `{ fabrication_job_id }`. Clamp the PCB. Returns `{ fabrication_job_id, carrier: {...} }`.
+- `POST /carrier/release` - `{ fabrication_job_id }`. Release the PCB. Returns `{ fabrication_job_id, carrier: {...} }`.
+- `POST /carrier/rotate_to_orientation` - `{ fabrication_job_id, orientation: "top" | "bottom" | "pcb_insertion" | "pcb_drop" }`. Rotate the carrier to a named orientation. Returns `{ fabrication_job_id, carrier: {...} }`.
+- `POST /carrier/rotate` - `{ fabrication_job_id, angle_deg }`. Rotate the carrier to an absolute angle. Stored value is normalized to `[0, 360)`. Returns `{ fabrication_job_id, carrier: {...} }`.
 
 ## Workflow
 
-Steps must be completed in order. Each step has preconditions that must be satisfied before `POST /fabrication_jobs/steps/complete` is accepted.
+Stages must be completed in order. Each stage has preconditions that must be satisfied before `POST /fabrication_jobs/next_stage` is accepted.
 
-| Step | Description |
-|------|-------------|
-| `load_pcb` | Place the copper board on the bed and load its lbrn files |
-| `clamp_pcb` | Tighten the carrier clamp until the PCB is secured |
-| `position_carrier` | Move the carrier to its working position |
+| Stage | Description |
+| --- | --- |
+| `load_pcb` | Place the copper board on the carrier and load its lbrn files |
+| `clamp_pcb` | Clamp the PCB |
+| `move_carrier_under_laser` | Move the carrier to its position under the laser |
 | `level_carrier` | Rotate the carrier to level the PCB |
-| `top_alignment` | Run the top alignment lbrn and save the laser offset |
-| `top_deoxidation` | Burn the top deoxidation pattern with the saved offset |
-| `top_copper_fill` | Burn the top copper fill with the saved offset |
-| `flip_board` | Rotate the carrier 180° to flip the PCB for bottom processing |
-| `bottom_alignment` | Run the bottom alignment lbrn and save the laser offset |
-| `bottom_deoxidation` | Burn the bottom deoxidation pattern with the saved offset |
-| `bottom_copper_fill` | Burn the bottom copper fill with the saved offset |
-| `release_pcb` | Move the carrier to the drop position, rotate it, and unclamp the PCB |
+| `top_alignment` | Complete the top-side alignment scan |
+| `top_deoxidation` | Call `set_origin` to record the top alignment origin, then burn the top deoxidation pattern |
+| `top_copper_fill` | Burn the top copper fill with the saved top alignment origin |
+| `flip_board` | Rotate the carrier to the bottom orientation |
+| `bottom_alignment` | Complete the bottom-side alignment scan |
+| `bottom_deoxidation` | Call `set_origin` to record the bottom alignment origin, then burn the bottom deoxidation pattern |
+| `bottom_copper_fill` | Burn the bottom copper fill with the saved bottom alignment origin |
+| `move_carrier_to_loading_position` | Move carrier to x=10 (loading/loadout position) |
+| `release_pcb` | Unclamp the PCB (`carrier/release`) |
 | `complete` | Job outputs are ready |
-
-## Development
-
-```bash
-bun install
-bun run dev       # start dev server (winterspec)
-bun run test      # run tests
-bun run typecheck # type-check
-bun run build     # bundle for production
-```

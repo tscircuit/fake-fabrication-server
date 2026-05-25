@@ -1,7 +1,7 @@
-import type { FabricationStep, FabricationStepSlug } from "./db/schema"
+import type { FabricationStage, FabricationStageSlug } from "./db/schema"
 
-export const fabricationStepDefinitions: Array<{
-  slug: FabricationStepSlug
+export const fabricationStageDefinitions: Array<{
+  slug: FabricationStageSlug
   name: string
   description: string
 }> = [
@@ -16,9 +16,9 @@ export const fabricationStepDefinitions: Array<{
     description: "Tighten the carrier clamp until the PCB is secured.",
   },
   {
-    slug: "position_carrier",
-    name: "Position Carrier",
-    description: "Move the carrier to its working position.",
+    slug: "move_carrier_under_laser",
+    name: "Move Carrier Under Laser",
+    description: "Move the carrier to its position under the laser.",
   },
   {
     slug: "level_carrier",
@@ -28,39 +28,42 @@ export const fabricationStepDefinitions: Array<{
   {
     slug: "top_alignment",
     name: "Top Alignment",
-    description:
-      "Run the top alignment LBRN and save the relative laser offset on the job.",
+    description: "Run the top alignment LBRN and save the laser origin.",
   },
   {
     slug: "top_deoxidation",
     name: "Top Deoxidation",
-    description: "Burn the top deoxidation pattern with the saved offset.",
+    description: "Burn the top deoxidation pattern with the saved origin.",
   },
   {
     slug: "top_copper_fill",
     name: "Top Copper Fill",
-    description: "Burn the top copper fill with the saved offset.",
+    description: "Burn the top copper fill with the saved origin.",
   },
   {
     slug: "flip_board",
     name: "Flip Board",
-    description: "Rotate the carrier to flip the PCB for bottom processing.",
+    description: "Rotate the carrier to the bottom orientation.",
   },
   {
     slug: "bottom_alignment",
     name: "Bottom Alignment",
-    description:
-      "Run the bottom alignment LBRN and save the relative laser offset on the job.",
+    description: "Run the bottom alignment LBRN and save the laser origin.",
   },
   {
     slug: "bottom_deoxidation",
     name: "Bottom Deoxidation",
-    description: "Burn the bottom deoxidation pattern with the saved offset.",
+    description: "Burn the bottom deoxidation pattern with the saved origin.",
   },
   {
     slug: "bottom_copper_fill",
     name: "Bottom Copper Fill",
-    description: "Burn the bottom copper fill with the saved offset.",
+    description: "Burn the bottom copper fill with the saved origin.",
+  },
+  {
+    slug: "move_carrier_to_loading_position",
+    name: "Move Carrier To Loading Position",
+    description: "Move carrier to loading/loadout position.",
   },
   {
     slug: "release_pcb",
@@ -75,26 +78,31 @@ export const fabricationStepDefinitions: Array<{
   },
 ]
 
-export const fabricationStepOrder: FabricationStepSlug[] =
-  fabricationStepDefinitions.map((step) => step.slug)
+export const fabricationStageOrder: FabricationStageSlug[] =
+  fabricationStageDefinitions.map((stage) => stage.slug)
 
-export function buildInitialSteps(): FabricationStep[] {
-  return fabricationStepDefinitions.map((step) => ({
-    slug: step.slug,
-    name: step.name,
-    description: step.description,
+export function buildInitialStages(): FabricationStage[] {
+  return fabricationStageDefinitions.map((stage) => ({
+    slug: stage.slug,
+    name: stage.name,
+    description: stage.description,
     status: "pending",
     started_at: null,
     completed_at: null,
   }))
 }
 
-export function getNextStep(
-  current: FabricationStepSlug,
-): FabricationStepSlug | null {
-  const index = fabricationStepOrder.indexOf(current)
-  if (index === -1 || index === fabricationStepOrder.length - 1) {
+export function getNextStage(
+  current: FabricationStageSlug,
+): FabricationStageSlug | null {
+  const index = fabricationStageOrder.indexOf(current)
+  if (index === -1 || index === fabricationStageOrder.length - 1) {
     return null
   }
-  return fabricationStepOrder[index + 1] ?? null
+  return fabricationStageOrder[index + 1] ?? null
 }
+
+export const fabricationStepDefinitions = fabricationStageDefinitions
+export const fabricationStepOrder = fabricationStageOrder
+export const buildInitialSteps = buildInitialStages
+export const getNextStep = getNextStage

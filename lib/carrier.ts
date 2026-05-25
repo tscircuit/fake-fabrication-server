@@ -3,11 +3,12 @@ import type {
   CarrierMoveRequest,
   CarrierResponse,
   CarrierRotateRequest,
+  CarrierRotateToOrientationRequest,
   CarrierState,
 } from "./db/schema"
 import type { AppContext } from "./types"
 import { requireJob, updateJob } from "./job-store"
-import { apiError, nowSeconds } from "./utils"
+import { nowSeconds } from "./utils"
 
 function normalizeAngle(deg: number): number {
   const mod = deg % 360
@@ -24,19 +25,17 @@ export function moveCarrierAlongRail(
   const job = requireJob(ctx.db, body.fabrication_job_id)
   if (job instanceof Response) return job
 
-  let x = body.x
-  if (x == null) {
-    x = job.carrier.position.x + (body.dx ?? 0)
-  }
-
   const carrier: CarrierState = {
     ...job.carrier,
-    position: { x },
-    has_been_positioned: true,
+    position: { x: body.x },
+    has_been_moved: true,
     last_command_at: nowSeconds(),
   }
   const updated = updateJob(ctx.db, { ...job, carrier })
-  return { ok: true, fabrication_job_id: updated.id, carrier: updated.carrier }
+  return {
+    fabrication_job_id: updated.id,
+    carrier: updated.carrier,
+  }
 }
 
 export function rotateCarrier(
@@ -46,19 +45,43 @@ export function rotateCarrier(
   const job = requireJob(ctx.db, body.fabrication_job_id)
   if (job instanceof Response) return job
 
-  let rotation_deg = body.angle_deg
-  if (rotation_deg == null) {
-    rotation_deg = job.carrier.rotation_deg + (body.delta_deg ?? 0)
-  }
-
   const carrier: CarrierState = {
     ...job.carrier,
-    rotation_deg: normalizeAngle(rotation_deg),
-    has_been_rotated: true,
+    rotation_deg: normalizeAngle(body.angle_deg),
     last_command_at: nowSeconds(),
   }
   const updated = updateJob(ctx.db, { ...job, carrier })
-  return { ok: true, fabrication_job_id: updated.id, carrier: updated.carrier }
+  return {
+    fabrication_job_id: updated.id,
+    carrier: updated.carrier,
+  }
+}
+
+export function rotateCarrierToOrientation(
+  body: CarrierRotateToOrientationRequest,
+  ctx: AppContext,
+): CarrierResponse | Response {
+  const job = requireJob(ctx.db, body.fabrication_job_id)
+  if (job instanceof Response) return job
+
+  const orientationAngles = {
+    top: 0,
+    bottom: 180,
+    pcb_insertion: 0,
+    pcb_drop: 45,
+  } satisfies Record<CarrierRotateToOrientationRequest["orientation"], number>
+
+  const carrier: CarrierState = {
+    ...job.carrier,
+    orientation: body.orientation,
+    rotation_deg: orientationAngles[body.orientation],
+    last_command_at: nowSeconds(),
+  }
+  const updated = updateJob(ctx.db, { ...job, carrier })
+  return {
+    fabrication_job_id: updated.id,
+    carrier: updated.carrier,
+  }
 }
 
 export function clampCarrier(
@@ -68,18 +91,16 @@ export function clampCarrier(
   const job = requireJob(ctx.db, body.fabrication_job_id)
   if (job instanceof Response) return job
 
-  const clamp_position = job.carrier.clamp_position + body.delta
-  if (clamp_position < 0) {
-    return apiError("Clamp position cannot be negative", 409)
-  }
-
   const carrier: CarrierState = {
     ...job.carrier,
-    clamp_position,
+    clamp_position: 1,
     last_command_at: nowSeconds(),
   }
   const updated = updateJob(ctx.db, { ...job, carrier })
-  return { ok: true, fabrication_job_id: updated.id, carrier: updated.carrier }
+  return {
+    fabrication_job_id: updated.id,
+    carrier: updated.carrier,
+  }
 }
 
 export function releaseCarrier(
@@ -95,5 +116,8 @@ export function releaseCarrier(
     last_command_at: nowSeconds(),
   }
   const updated = updateJob(ctx.db, { ...job, carrier })
-  return { ok: true, fabrication_job_id: updated.id, carrier: updated.carrier }
+  return {
+    fabrication_job_id: updated.id,
+    carrier: updated.carrier,
+  }
 }

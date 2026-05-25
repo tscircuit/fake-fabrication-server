@@ -2,7 +2,12 @@ import { createStore } from "zustand/vanilla"
 import { combine } from "zustand/middleware"
 import { hoist } from "zustand-hoist"
 
-import { type Job, databaseSchema, type DatabaseSchema } from "./schema"
+import {
+  type Job,
+  type LaserBurnRun,
+  databaseSchema,
+  type DatabaseSchema,
+} from "./schema"
 
 export const createDatabase = () => {
   return hoist(createStore(initializer))
@@ -19,6 +24,9 @@ const initializer = combine(databaseSchema.parse({}), (set, get) => ({
   getJob: (id: string) => {
     return get().jobs.find((job) => job.id === id)
   },
+  listJobs: () => {
+    return get().jobs
+  },
   setJob: (job: Job) => {
     set((state: DatabaseSchema) => ({
       jobs: [...state.jobs.filter(({ id }) => id !== job.id), job],
@@ -27,7 +35,20 @@ const initializer = combine(databaseSchema.parse({}), (set, get) => ({
   getJobsMap: () => {
     return new Map(get().jobs.map((job) => [job.id, job] as const))
   },
+  getLaserBurnRun: (id: string) => {
+    return get().laserBurnRuns.find((run) => run.laser_burn_run_id === id)
+  },
+  listLaserBurnRuns: (fabricationJobId: string) => {
+    return get().laserBurnRuns.filter(
+      (run) => run.fabrication_job_id === fabricationJobId,
+    )
+  },
+  addLaserBurnRun: (laserBurnRun: LaserBurnRun) => {
+    set((state: DatabaseSchema) => ({
+      laserBurnRuns: [...state.laserBurnRuns, laserBurnRun],
+    }))
+  },
   clearJobs: () => {
-    set({ jobs: [] })
+    set({ jobs: [], laserBurnRuns: [] })
   },
 }))

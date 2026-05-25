@@ -6,7 +6,7 @@ test("rotate carrier can set an absolute angle", async () => {
   const job = await createTestJob(ky)
 
   await ky.post("carrier/rotate", {
-    json: { fabrication_job_id: job.id, delta_deg: 180 },
+    json: { fabrication_job_id: job.id, angle_deg: 180 },
   })
   const res = await ky.post("carrier/rotate", {
     json: { fabrication_job_id: job.id, angle_deg: 45 },

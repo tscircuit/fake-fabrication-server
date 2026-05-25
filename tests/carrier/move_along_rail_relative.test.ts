@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import { createTestJob, getTestServer } from "tests/fixtures/getTestServer"
 
-test("move carrier applies relative x delta", async () => {
+test("move carrier rejects relative x delta", async () => {
   const { ky } = await getTestServer()
   const job = await createTestJob(ky)
 
@@ -12,7 +12,5 @@ test("move carrier applies relative x delta", async () => {
     json: { fabrication_job_id: job.id, dx: -15 },
   })
 
-  expect(res.status).toBe(200)
-  const body = await res.json<any>()
-  expect(body.carrier.position).toEqual({ x: 35 })
+  expect(res.status).toBe(400)
 })

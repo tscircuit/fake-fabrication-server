@@ -1,6 +1,6 @@
 import { z } from "zod"
-import { moveLaser } from "../../lib/laser"
-import { laserStateSchema } from "../../lib/db/schema"
+import { setLaserOrigin } from "../../lib/laser"
+import { laserResponseSchema } from "../../lib/db/schema"
 import { withRouteSpec } from "../../lib/middleware/with-winter-spec"
 
 export default withRouteSpec({
@@ -8,17 +8,15 @@ export default withRouteSpec({
   jsonBody: z
     .object({
       fabrication_job_id: z.string(),
-      dx: z.number(),
-      dy: z.number(),
+      origin: z.object({
+        x: z.number(),
+        y: z.number(),
+      }),
     })
     .strict(),
-  jsonResponse: z.object({
-    ok: z.literal(true),
-    fabrication_job_id: z.string(),
-    laser: laserStateSchema,
-  }),
+  jsonResponse: laserResponseSchema,
 })(async (req, ctx) => {
-  const result = moveLaser(req.jsonBody, ctx)
+  const result = setLaserOrigin(req.jsonBody, ctx)
   if (result instanceof Response) {
     return result
   }

@@ -1,31 +1,29 @@
 import type {
   CreateJobRequest,
-  FabricationStep,
-  FabricationStepSlug,
+  FabricationStage,
+  FabricationStageSlug,
   Job,
 } from "./db/schema"
 import type { AppContext } from "./types"
 import { requireJob, updateJob } from "./job-store"
-import { buildInitialSteps, getNextStep } from "./steps"
+import { buildInitialStages, getNextStage } from "./steps"
 import { apiError, normalizeMetadata, nowSeconds } from "./utils"
 
 const INITIAL_LASER_STATE = {
-  alignment_on: false,
-  alignment_lbrn: null,
   alignment_origin: null,
   position: { x: 0, y: 0 },
   last_burn_lbrn: null,
   last_burn_passes: null,
-  last_burn_offset: null,
+  last_burn_origin: null,
   last_burn_file_content: null,
   last_command_at: null,
 } as const
 
 const INITIAL_CARRIER_STATE = {
   position: { x: 0 },
-  has_been_positioned: false,
+  has_been_moved: false,
   rotation_deg: 0,
-  has_been_rotated: false,
+  orientation: null,
   clamp_position: 0,
   last_command_at: null,
 } as const
@@ -35,11 +33,11 @@ export async function createJob(
   ctx: AppContext,
 ): Promise<Job | Response> {
   const id = ctx.db.createId("job")
-  const steps = buildInitialSteps()
-  const firstStep = steps[0]!
+  const stages = buildInitialStages()
+  const firstStage = stages[0]!
 
-  steps[0] = {
-    ...firstStep,
+  stages[0] = {
+    ...firstStage,
     status: "in_progress",
     started_at: nowSeconds(),
   }
@@ -49,13 +47,13 @@ export async function createJob(
     object: "fabrication.job",
     created: nowSeconds(),
     status: "in_progress",
-    current_step: firstStep.slug,
-    steps,
+    current_stage: firstStage.slug,
+    stages,
     laser: { ...INITIAL_LASER_STATE },
     carrier: { ...INITIAL_CARRIER_STATE },
     lbrn_files: body.lbrn_files,
-    top_alignment_offset: null,
-    bottom_alignment_offset: null,
+    top_alignment_origin: null,
+    bottom_alignment_origin: null,
     metadata: normalizeMetadata(body.metadata),
   }
 
@@ -69,168 +67,122 @@ export function retrieveJob(
   return requireJob(ctx.db, params.fabrication_job_id)
 }
 
-export function completeStep(
-  params: { fabrication_job_id: string; step: FabricationStepSlug },
+export function listJobs(
+  _params: { limit?: number },
+  ctx: AppContext,
+): Job[] {
+  return ctx.db.listJobs()
+}
+
+export function advanceStage(
+  params: { fabrication_job_id: string; current_stage: FabricationStageSlug },
   ctx: AppContext,
 ): Job | Response {
   const job = requireJob(ctx.db, params.fabrication_job_id)
   if (job instanceof Response) return job
 
-  const stepIndex = job.steps.findIndex((s) => s.slug === params.step)
-  if (stepIndex === -1) {
+  const stageIndex = job.stages.findIndex((s) => s.slug === params.current_stage)
+  if (stageIndex === -1) {
     return apiError(
-      `No such step '${params.step}' on job '${params.fabrication_job_id}'`,
+      `No such stage '${params.current_stage}' on job '${params.fabrication_job_id}'`,
       404,
     )
   }
 
-  const step = job.steps[stepIndex]!
-  if (step.status === "complete") {
-    return apiError(`Step '${params.step}' is already complete`, 409)
+  const stage = job.stages[stageIndex]!
+  if (stage.status === "complete") {
+    return apiError(`Stage '${params.current_stage}' is already complete`, 409)
   }
-  if (job.current_step !== params.step) {
+  if (job.current_stage !== params.current_stage) {
     return apiError(
-      `Step '${params.step}' is not the current step (current: '${job.current_step}')`,
+      `Stage '${params.current_stage}' is not the current stage (current: '${job.current_stage}')`,
       409,
     )
   }
 
-  const preconditionError = validateStepCompletion(job, params.step)
+  const preconditionError = validateStageCompletion(job, params.current_stage)
   if (preconditionError != null) {
     return apiError(preconditionError, 409)
   }
 
   const now = nowSeconds()
-  const updatedSteps: FabricationStep[] = [...job.steps]
-  updatedSteps[stepIndex] = {
-    ...step,
+  const updatedStages: FabricationStage[] = [...job.stages]
+  updatedStages[stageIndex] = {
+    ...stage,
     status: "complete",
-    started_at: step.started_at ?? now,
+    started_at: stage.started_at ?? now,
     completed_at: now,
   }
 
-  const nextSlug = getNextStep(params.step)
-  let nextCurrent: FabricationStepSlug | null = nextSlug
+  const nextSlug = getNextStage(params.current_stage)
+  let nextCurrent: FabricationStageSlug | null = nextSlug
   let nextStatus: Job["status"] = "in_progress"
 
   if (nextSlug == null) {
     nextCurrent = null
     nextStatus = "complete"
   } else {
-    const nextIndex = updatedSteps.findIndex((s) => s.slug === nextSlug)
+    const nextIndex = updatedStages.findIndex((s) => s.slug === nextSlug)
     if (nextIndex !== -1) {
-      updatedSteps[nextIndex] = {
-        ...updatedSteps[nextIndex]!,
+      updatedStages[nextIndex] = {
+        ...updatedStages[nextIndex]!,
         status: "in_progress",
         started_at: now,
       }
     }
   }
 
-  // The operator moves the laser into place with relative moves; the resulting
-  // laser position is the saved alignment offset for that side.
-  let top_alignment_offset = job.top_alignment_offset
-  if (params.step === "top_alignment") {
-    top_alignment_offset = getRelativeAlignmentOffset(job)
-  }
-
-  let bottom_alignment_offset = job.bottom_alignment_offset
-  if (params.step === "bottom_alignment") {
-    bottom_alignment_offset = getRelativeAlignmentOffset(job)
-  }
-
   const updatedJob: Job = {
     ...job,
     status: nextStatus,
-    current_step: nextCurrent,
-    steps: updatedSteps,
-    top_alignment_offset,
-    bottom_alignment_offset,
-    laser:
-      params.step === "top_alignment" || params.step === "bottom_alignment"
-        ? { ...job.laser, alignment_origin: null }
-        : job.laser,
-    carrier:
-      params.step === "level_carrier"
-        ? { ...job.carrier, has_been_rotated: false }
-        : job.carrier,
+    current_stage: nextCurrent,
+    stages: updatedStages,
   }
 
   return updateJob(ctx.db, updatedJob)
 }
 
-function getRelativeAlignmentOffset(job: Job): { x: number; y: number } {
-  const origin = job.laser.alignment_origin
-  if (origin == null) {
-    throw new Error(
-      "alignment_origin is null — validateStepCompletion should have prevented this",
-    )
-  }
-  return {
-    x: job.laser.position.x - origin.x,
-    y: job.laser.position.y - origin.y,
-  }
-}
-
-function validateStepCompletion(
+function validateStageCompletion(
   job: Job,
-  stepSlug: FabricationStepSlug,
+  stageSlug: FabricationStageSlug,
 ): string | null {
-  if (stepSlug === "clamp_pcb" && job.carrier.clamp_position <= 0) {
+  if (stageSlug === "clamp_pcb" && job.carrier.clamp_position <= 0) {
     return "PCB must be clamped before completing clamp_pcb"
   }
 
-  if (stepSlug === "position_carrier" && !job.carrier.has_been_positioned) {
-    return "Carrier must be positioned before completing position_carrier"
+  if (stageSlug === "move_carrier_under_laser" && !job.carrier.has_been_moved) {
+    return "Carrier must be moved before completing move_carrier_under_laser"
   }
 
-  if (stepSlug === "level_carrier" && !job.carrier.has_been_rotated) {
+  if (stageSlug === "level_carrier" && job.carrier.rotation_deg === 0) {
     return "Carrier must be leveled before completing level_carrier"
   }
 
-  if (stepSlug === "flip_board" && !job.carrier.has_been_rotated) {
-    return "Carrier must be rotated before completing flip_board"
+  if (stageSlug === "flip_board" && job.carrier.orientation !== "bottom") {
+    return "Carrier must be rotated to the bottom orientation before completing flip_board"
   }
 
-  if (
-    (stepSlug === "top_alignment" || stepSlug === "bottom_alignment") &&
-    job.laser.alignment_on
-  ) {
-    return "Laser alignment must be off before completing alignment"
+  const burnStages = new Set([
+    "top_deoxidation",
+    "top_copper_fill",
+    "bottom_deoxidation",
+    "bottom_copper_fill",
+  ])
+  if (burnStages.has(stageSlug) && job.laser.last_burn_lbrn !== stageSlug) {
+    return `Must burn '${stageSlug}' before completing ${stageSlug}`
   }
 
-  if (
-    (stepSlug === "top_alignment" || stepSlug === "bottom_alignment") &&
-    job.laser.alignment_origin == null
-  ) {
-    return "Laser alignment must be started before completing alignment"
-  }
-
-  const burnStepLbrn: Partial<Record<FabricationStepSlug, string>> = {
-    top_deoxidation: job.lbrn_files.top_deoxidation,
-    top_copper_fill: job.lbrn_files.top_copper_fill,
-    bottom_deoxidation: job.lbrn_files.bottom_deoxidation,
-    bottom_copper_fill: job.lbrn_files.bottom_copper_fill,
-  }
-  const expectedBurnLbrn = burnStepLbrn[stepSlug]
-  if (
-    expectedBurnLbrn != null &&
-    job.laser.last_burn_lbrn !== expectedBurnLbrn
-  ) {
-    return `Must burn '${expectedBurnLbrn}' before completing ${stepSlug}`
-  }
-
-  if (stepSlug === "release_pcb") {
+  if (stageSlug === "move_carrier_to_loading_position") {
     if (job.carrier.position.x !== 10) {
-      return "Carrier must be moved to the release position"
+      return "Carrier must be moved to the loading position"
     }
-    if (job.carrier.rotation_deg !== 45) {
-      return "Carrier must be rotated to the release angle"
-    }
-    if (job.carrier.clamp_position !== 0) {
-      return "PCB must be unclamped before completing release_pcb"
-    }
+  }
+
+  if (stageSlug === "release_pcb" && job.carrier.clamp_position !== 0) {
+    return "PCB must be unclamped before completing release_pcb"
   }
 
   return null
 }
+
+export const completeStep = advanceStage

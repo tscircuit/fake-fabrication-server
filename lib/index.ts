@@ -11,9 +11,13 @@ export type {
   CarrierPosition,
   CarrierResponse,
   CarrierRotateRequest,
+  CarrierRotateToOrientationRequest,
   CarrierState,
   CreateJobRequest,
   CreateJobMetadata,
+  FabricationStage,
+  FabricationStageSlug,
+  FabricationStageStatus,
   FabricationServerOptions,
   FabricationStep,
   FabricationStepSlug,
@@ -22,15 +26,24 @@ export type {
   JobLbrnFiles,
   JobMetadata,
   JobStatus,
+  LaserBurnRun,
+  LaserBurnRunResponse,
+  LaserBurnRunsListResponse,
   LaserBurnRequest,
   LaserAlignmentRequest,
+  LaserSetOriginRequest,
   LaserMoveRequest,
   LaserPosition,
   LaserResponse,
   LaserState,
 } from "./types"
 
-export { fabricationStepDefinitions, fabricationStepOrder } from "./steps"
+export {
+  fabricationStageDefinitions,
+  fabricationStageOrder,
+  fabricationStepDefinitions,
+  fabricationStepOrder,
+} from "./steps"
 
 export class FabricationServer {
   readonly hostname: string

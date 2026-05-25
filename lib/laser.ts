@@ -1,41 +1,47 @@
 import type {
   Job,
-  LaserAlignmentRequest,
   LaserBurnRequest,
   LaserMoveRequest,
   LaserResponse,
+  LaserSetOriginRequest,
   LaserState,
 } from "./db/schema"
 import type { AppContext } from "./types"
 import { requireJob, updateJob } from "./job-store"
 import { apiError, nowSeconds } from "./utils"
 
-export function setLaserAlignment(
-  body: LaserAlignmentRequest,
+const TOP_BURN_STAGES = new Set(["top_deoxidation", "top_copper_fill"])
+const BOTTOM_BURN_STAGES = new Set(["bottom_deoxidation", "bottom_copper_fill"])
+
+export function setLaserOrigin(
+  body: LaserSetOriginRequest,
   ctx: AppContext,
 ): LaserResponse | Response {
   const job = requireJob(ctx.db, body.fabrication_job_id)
   if (job instanceof Response) return job
 
-  let alignment_lbrn: string | null = null
-  if (body.on) {
-    alignment_lbrn = body.lbrn
-  }
-
-  let alignment_origin = job.laser.alignment_origin
-  if (body.on) {
-    alignment_origin = { ...job.laser.position }
-  }
-
   const laser: LaserState = {
     ...job.laser,
-    alignment_on: body.on,
-    alignment_lbrn,
-    alignment_origin,
+    alignment_origin: body.origin,
     last_command_at: nowSeconds(),
   }
-  const updated = updateJob(ctx.db, { ...job, laser })
-  return { ok: true, fabrication_job_id: updated.id, laser: updated.laser }
+  const updatedJob = {
+    ...job,
+    laser,
+    top_alignment_origin:
+      job.current_stage && TOP_BURN_STAGES.has(job.current_stage)
+        ? body.origin
+        : job.top_alignment_origin,
+    bottom_alignment_origin:
+      job.current_stage && BOTTOM_BURN_STAGES.has(job.current_stage)
+        ? body.origin
+        : job.bottom_alignment_origin,
+  }
+  const updated = updateJob(ctx.db, updatedJob)
+  return {
+    fabrication_job_id: updated.id,
+    laser: updated.laser,
+  }
 }
 
 export function moveLaser(
@@ -54,13 +60,16 @@ export function moveLaser(
     last_command_at: nowSeconds(),
   }
   const updated = updateJob(ctx.db, { ...job, laser })
-  return { ok: true, fabrication_job_id: updated.id, laser: updated.laser }
+  return {
+    fabrication_job_id: updated.id,
+    laser: updated.laser,
+  }
 }
 
-export async function burnLaser(
+export function burnLaser(
   body: LaserBurnRequest,
   ctx: AppContext,
-): Promise<LaserResponse | Response> {
+): LaserResponse | Response {
   const job = requireJob(ctx.db, body.fabrication_job_id)
   if (job instanceof Response) return job
 
@@ -68,70 +77,68 @@ export async function burnLaser(
   if (expectedLbrn instanceof Response) {
     return expectedLbrn
   }
-  if (body.lbrn !== expectedLbrn) {
+  if (body.lbrn_vfs_path !== expectedLbrn) {
     return apiError(
-      `Expected burn lbrn '${expectedLbrn}' for step '${job.current_step}'`,
+      `Expected burn lbrn '${expectedLbrn}' for stage '${job.current_stage}'`,
       409,
     )
   }
 
-  let offset = job.top_alignment_offset
+  let origin = job.top_alignment_origin
   if (
-    job.current_step === "bottom_deoxidation" ||
-    job.current_step === "bottom_copper_fill"
+    job.current_stage === "bottom_deoxidation" ||
+    job.current_stage === "bottom_copper_fill"
   ) {
-    offset = job.bottom_alignment_offset
+    origin = job.bottom_alignment_origin
   }
-  if (offset == null) {
+  if (origin == null) {
     return apiError(
-      `No saved alignment offset for step '${job.current_step}'`,
+      `No saved alignment origin for stage '${job.current_stage}'`,
       409,
     )
   }
 
-  const last_burn_file_content = await fetchLbrnContent(body.lbrn)
+  const last_burn_file_content = job.lbrn_files[body.lbrn_vfs_path] ?? null
+  const passes = body.passes ?? 1
+  const laserBurnRun = {
+    laser_burn_run_id: ctx.db.createId("laser_burn_run"),
+    fabrication_job_id: job.id,
+    lbrn_vfs_path: body.lbrn_vfs_path,
+    passes,
+    origin,
+    file_content: last_burn_file_content,
+    created: nowSeconds(),
+  }
+  ctx.db.addLaserBurnRun(laserBurnRun)
 
   const laser: LaserState = {
     ...job.laser,
-    last_burn_lbrn: body.lbrn,
-    last_burn_passes: body.passes ?? 1,
-    last_burn_offset: offset,
+    last_burn_lbrn: body.lbrn_vfs_path,
+    last_burn_passes: passes,
+    last_burn_origin: origin,
     last_burn_file_content,
     last_command_at: nowSeconds(),
   }
   const updated = updateJob(ctx.db, { ...job, laser })
-  return { ok: true, fabrication_job_id: updated.id, laser: updated.laser }
-}
-
-const FAKE_LBRN_CONTENT = `<?xml version="1.0" encoding="UTF-8"?>
-<LightBurnProject AppVersion="1.7.00" FormatVersion="1" MaterialHeight="0" MirrorX="False" MirrorY="False">
-</LightBurnProject>`
-
-async function fetchLbrnContent(url: string): Promise<string | null> {
-  if (url.includes("fake-r2.tscircuit.com")) {
-    return FAKE_LBRN_CONTENT
-  }
-  try {
-    const res = await fetch(url)
-    return res.ok ? await res.text() : null
-  } catch {
-    return null
+  return {
+    fabrication_job_id: updated.id,
+    laser: updated.laser,
+    laser_burn_run: laserBurnRun,
   }
 }
+
+const burnableStages = new Set([
+  "top_deoxidation",
+  "top_copper_fill",
+  "bottom_deoxidation",
+  "bottom_copper_fill",
+])
 
 function getExpectedBurnLbrn(job: Job): string | Response {
-  if (job.current_step === "top_deoxidation") {
-    return job.lbrn_files.top_deoxidation
+  if (job.current_stage && burnableStages.has(job.current_stage)) {
+    return job.current_stage
   }
-  if (job.current_step === "top_copper_fill") {
-    return job.lbrn_files.top_copper_fill
-  }
-  if (job.current_step === "bottom_deoxidation") {
-    return job.lbrn_files.bottom_deoxidation
-  }
-  if (job.current_step === "bottom_copper_fill") {
-    return job.lbrn_files.bottom_copper_fill
-  }
-
-  return apiError(`Cannot burn during step '${job.current_step}'`, 409)
+  return apiError(`Cannot burn during stage '${job.current_stage}'`, 409)
 }
+
+export const setLaserAlignment = setLaserOrigin

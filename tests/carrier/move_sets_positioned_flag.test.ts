@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import { createTestJob, getTestServer } from "tests/fixtures/getTestServer"
 
-test("move sets has_been_positioned", async () => {
+test("move sets has_been_moved", async () => {
   const { ky } = await getTestServer()
   const job = await createTestJob(ky)
 
@@ -9,5 +9,5 @@ test("move sets has_been_positioned", async () => {
     json: { fabrication_job_id: job.id, x: 50 },
   })
   const body = await res.json<any>()
-  expect(body.carrier.has_been_positioned).toBe(true)
+  expect(body.carrier.has_been_moved).toBe(true)
 })
