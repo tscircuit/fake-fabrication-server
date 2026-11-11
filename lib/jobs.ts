@@ -68,10 +68,11 @@ export function retrieveJob(
 }
 
 export function listJobs(
-  _params: { limit?: number },
+  params: { limit?: number },
   ctx: AppContext,
 ): Job[] {
-  return ctx.db.listJobs()
+  const jobs = ctx.db.listJobs()
+  return params.limit == null ? jobs : jobs.slice(0, params.limit)
 }
 
 export function advanceStage(
